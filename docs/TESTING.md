@@ -3,6 +3,9 @@
 Four ways to run this app, in increasing order of what they prove and of how
 much kit they need. Pick the cheapest one that can answer your question.
 
+For the *order* to do the hardware work in, from first capture to the track
+session that closes #25, see [`HARDWARE-ROADMAP.md`](HARDWARE-ROADMAP.md).
+
 | Route | Needs | Proves | Does not prove |
 |---|---|---|---|
 | **1. Unit tests** | nothing | the decoder, the rep tracker, the course model, the FIT fields | that a chip sends what we think |
