@@ -35,6 +35,10 @@ What is done:
 
 ## Next steps
 
+**Have a Freelap system? Start with
+[`docs/HARDWARE-ROADMAP.md`](docs/HARDWARE-ROADMAP.md)**: the phased, test-first
+order of work from first capture to a validated track session.
+
 Almost everything left needs an FxChip and a transmitter set to **Finish**.
 In rough order of what it would settle:
 
@@ -88,6 +92,7 @@ docs/screenshots/                   the main view at each target resolution
 captures/                           BLE captures the protocol was derived from
 docs/REVERSE-ENGINEERING.md         confirming the frame against a real chip
 docs/TESTING.md                     simulator, nRF52 radio, and on-watch verification
+docs/HARDWARE-ROADMAP.md            the order of work once you own a chip
 ```
 
 ## Website
