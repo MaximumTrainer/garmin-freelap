@@ -7,8 +7,9 @@ This guide is for one specific kit:
 * a **phone with nRF Connect** (and MyFreelap);
 * a **Garmin fenix 7 Pro**.
 
-There is no sniffer dongle in that list, so every capture here comes from the
-phone. Parts 1–5 need no Garmin code changes at all, and they produce the real
+There is no sniffer dongle in that list, and nothing here needs Android
+developer mode: captures come from nRF Connect's raw view on the phone, and
+optionally from a laptop's own Bluetooth running `tools/ble_capture.py`. Parts 1–5 need no Garmin code changes at all, and they produce the real
 frames everything after them is tested against. Part 6 puts the app on the
 fenix 7 Pro. Parts 7–8 are the code and the track session that follow.
 
@@ -69,31 +70,28 @@ becomes the watch's course in Part 6.
 
 ### 1.3 The phone
 
-**Android is strongly preferred.** It can record every packet the phone's
-Bluetooth controller receives (the HCI snoop log, Part 3), and nRF Connect for
-Android shows the full raw bytes of what it received. On most Android phones
-that raw view holds the advertisement and the scan response back to back.
+**Android is preferred.** nRF Connect for Android shows the full raw bytes of
+the record the phone received, and on most Android phones that raw view holds
+the advertisement and the scan response back to back. That is exactly what
+#60 and #78 need to see.
 
 **On iOS**, nRF Connect is still fine for Part 2 (is the chip there, what does
 it advertise, does it connect). But iOS gives apps a processed view of
-advertising data and has no user-accessible packet log, so it may hide whether
-something arrived in the advertisement or the scan response. That difference is
-the whole point of #60. If you only have an iPhone, do Part 2 on it and borrow
-an Android phone, or buy an nRF52840 Dongle, for Part 3.
+advertising data, so it may hide whether something arrived in the
+advertisement or the scan response. If you only have an iPhone, use the laptop
+route in Part 3 and borrow an Android phone for the raw view.
 
-On Android, before the first session:
+Before the first session (no developer options, no USB debugging):
 
-1. Install **nRF Connect for Mobile** and **MyFreelap**. Pair the chip with
+1. Install **nRF Connect for Mobile** and **MyFreelap**. Set the chip up in
    MyFreelap the way its manual says.
 2. In nRF Connect's settings, set the scanner to run **continuously**, not for a
    fixed period. If it offers a scan mode, choose **low latency**.
-3. Enable **Developer options** (tap *Build number* seven times), then turn on
-   **Bluetooth HCI snoop log**. If it offers *Filtered* or *Enabled*, choose
-   **Enabled**. Filtered mode can cut payloads short. Toggle Bluetooth off and
-   on so the setting takes effect.
-4. On your computer: install `adb` (Android platform tools) and **Wireshark**
-   (which includes `tshark`), and check `adb devices` sees the phone with USB
-   debugging on.
+3. Pick somewhere to paste hex that reaches your computer: a notes app that
+   syncs, or an email draft to yourself. Plain text is all it needs.
+4. **Optional, recommended:** a laptop with Bluetooth for the continuous
+   recording in Part 3. On it, `pip install bleak` (Windows, macOS or Linux; no
+   special drivers).
 
 ### 1.4 The repository
 
@@ -162,10 +160,20 @@ something the tests can read.
 
 ## Part 3 — Record a capture (per run)
 
-The Android HCI snoop log records every advertising packet the phone's
-controller hands up, with timestamps, whichever app asked for the scan. With
-MyFreelap and nRF Connect both scanning actively, scan responses are captured
-too.
+Two routes, and neither needs developer mode. Use both together on the first
+session if you can: they check each other.
+
+| | **Phone: nRF Connect RAW** | **Laptop: `ble_capture.py live`** |
+|---|---|---|
+| Gets | one record per rep, **both halves** where Android merges them | **every** broadcast, timestamped, for as long as it runs |
+| Settles | the frame contents: #4, #6, #60/#78 from the phone's side | repeat rate, window length (Run E), recovery (Run H): #9 |
+| Effort | a copy and paste after each rep | start it, leave it |
+| Limit | no repeats, so no timing between broadcasts | may keep only one of the two halves when the OS merges them |
+
+Both write the same capture TSV, which `decode_capture.py`,
+`fake_chip.py --replay` and the Part 4 test read: one row per Freelap entry,
+`<time>\t<label>\t<hex>`, with the payload starting with the company id
+`63 03`.
 
 ### 3.1 Before each run: write the expectation first
 
@@ -190,61 +198,65 @@ any capture**:
 
 Times are in seconds to the hundredth, exactly as MyFreelap shows them.
 `phone_clock_finish` is the phone's clock when you crossed FINISH, read off the
-phone or said into a voice memo. It is how you find the run in a log that holds
-the whole session.
+phone or said into a voice memo. It is how you find the run in the laptop's
+session log, and it labels the line you paste from the phone.
 
-### 3.2 Run, then pull the log
+### 3.2 Phone route: copy the raw record after each rep
 
-1. Make sure the HCI snoop log is on (1.3). Open MyFreelap, then nRF Connect's
-   scanner, and leave both running.
-2. Do the run. Note the phone time at the finish.
-3. When the session is over, pull the log:
+1. Open MyFreelap and nRF Connect's scanner, and leave both running. With two
+   apps scanning actively, the chip is asked for its scan response.
+2. Do the run. Note the phone's clock at the finish.
+3. **Straight away**, while the chip is still broadcasting (Part 2 step 6 told
+   you how long you have), tap the chip's row in nRF Connect → **RAW**. Copy
+   the hex with the dialog's copy button, or long-press it to select and copy.
+4. Paste it into your notes as one line: the time, the run name, then the hex
+   exactly as copied:
 
-   ```bash
-   adb bugreport session.zip
+   ```
+   10:42:17  B1  0x0201061BFF6303...
    ```
 
-   The log is inside the zip, usually at
-   `FS/data/misc/bluetooth/logs/btsnoop_hci.log`. The exact path varies by
-   phone, so search the zip for `btsnoop`. One bugreport per session is enough,
-   because the log holds every run.
+   One line per rep. Headings and asides in the same file are fine; lines
+   without a time and a Freelap entry are skipped.
+5. Also screenshot the RAW dialog for the first rep of each run, so there is
+   something to check the copy against.
 
-   **Never commit the bugreport.** It is full of personal data. Only the
-   filtered TSV from 3.3 goes in the repository.
-
-### 3.3 Export to the repository's capture format
-
-`tools/decode_capture.py` and `tools/fake_chip.py --replay` read one row per
-packet: `<epoch>\t<anything>\t<hex payload>`. The payload must **start with the
-company id in little-endian, `63 03`**, which is how the decoder recognises the
-frame.
+On the computer, turn the notes into one capture file per run:
 
 ```bash
-tshark -r btsnoop_hci.log \
-  -Y 'btcommon.eir_ad.entry.company_id == 0x0363' \
-  -T fields -E separator=/t \
-  -e frame.time_epoch \
-  -e bthci_evt.le_advts_event_type \
-  -e btcommon.eir_ad.entry.data \
-| awk -F'\t' '{ print $1 "\t" $2 "\t6303" $3 }' > all.tsv
+python tools/ble_capture.py raw notes-B.txt > captures/<dir>/B1.tsv
+python tools/decode_capture.py captures/<dir>/B1.tsv
 ```
 
-* Column 2 is the packet type, so advertisement and scan-response rows are
-  told apart in the file. That matters for #78.
-* Wireshark shows the company id as its own field and leaves it out of `data`,
-  hence the `6303` the `awk` puts back.
-* Field names change between Wireshark versions. If a column comes out empty,
-  open the log in Wireshark, click the field you want, *Copy → Field Name*, and
-  use that. Check the first few rows by eye against your nRF Connect RAW
-  screenshot from Part 2. The hex should be recognisably the same.
+A raw record holding both halves becomes two rows, labelled `B1 1/2` and
+`B1 2/2`. **Count them:** two Freelap entries in one record means the phone
+received the scan response, which is the evidence #60 and #78 are after (from
+the phone's side; what Connect IQ hands the watch is Part 7's question).
 
-Then cut `all.tsv` into one file per run (`B1.tsv`, …) using the finish times
-you noted. A few seconds either side is plenty.
+### 3.3 Laptop route: record everything, continuously
 
-**No laptop at the track?** For a handful of reps you can copy the hex out of
-nRF Connect's RAW view by hand into a row of the same shape. Use any number for
-the time, keep `6303…` at the start, and say in `notes` that it was transcribed
-by hand.
+Put the laptop within a few metres of the FINISH cone, at least 30 cm from
+where the chip passes, and start it before the first run:
+
+```bash
+python tools/ble_capture.py live --out captures/<dir>/session.tsv
+```
+
+It scans actively, appends a row for every broadcast carrying Freelap's company
+id, and prints a line each time a *new* frame decodes. That line is your
+confirmation the rep was heard:
+
+```
+10:42:18  advertisement BC-9636 lap#3 split=00:06.13
+```
+
+Stop it with Ctrl+C. Rows are stamped with the laptop's clock in epoch seconds.
+To cut the session into runs, find each run's finish time in the printed lines
+and copy the rows from a few seconds before to the end of its broadcasts into
+`B1.tsv` and so on. Column 2 holds the chip's address, its local name once seen,
+and on Windows whether the packet was an advertisement or a scan response.
+
+The chip's own address is fine to commit. The laptop's is never written.
 
 ### 3.4 The runs, adapted to three cones
 
@@ -258,9 +270,9 @@ Walk or jog: speed does not matter yet.
 | **B** | START → LAP → FINISH, three times with a rest between | intermediates in the scan response, and their order |
 | **C** | START → LAP → FINISH, three reps back to back with no rest | whether counters reset per rep: `OFFSET` vs `FROMLAP` (#6) |
 | **D** | Shake the chip, no crossing | discoverable mode and the local name (Part 2 step 2) |
-| **E** | One rep, then leave the scanner running for 2 minutes | how long the broadcast window lasts (#9) |
+| **E** | One rep, then leave the laptop recording (or nRF Connect scanning) for 2 minutes | how long the broadcast window lasts (#9) |
 | **G** | Walk out of range of the phone mid-rep, finish, come back | whether a missed crossing can be recovered |
-| **H** | Run a rep with both apps **closed**, then open them and shake the chip | shake recovery of the last time (#9) |
+| **H** | Run a rep with both apps closed **and the laptop stopped**, then start them and shake the chip | shake recovery of the last time (#9) |
 
 Run F needs a second chip. Skip it until you can borrow one.
 
@@ -318,8 +330,8 @@ stale. Then add a `RealCaptureTest.mc` that runs those bytes through
 numbers. This is the "vectors taken from real captures" criterion in #7.
 
 Commit the TSVs, `expected.json` and screenshots. **Leave out anything that
-identifies the phone**: no bugreport, no phone Bluetooth address. The chip's own
-address is fine.
+identifies the phone or laptop**: crop screenshots to the RAW dialog, and never
+include their Bluetooth addresses. The chip's own address is fine.
 
 ---
 
@@ -332,10 +344,10 @@ Write it on the issues, including negative results:
 - **#6:** the result of Run C, and of the long-running capture when you have it.
 - **#9:** how long the broadcast window lasted (Run E), and whether shaking
   recovered a missed rep (Run H).
-- **#78 (from the phone's point of view):** whether the advertisement and scan
-  response arrived as separate packets. In an HCI log they normally do, as
-  separate event types. What *Connect IQ* hands the app is still Part 7's
-  question.
+- **#78 (from the phone's point of view):** whether nRF Connect's raw record
+  held both halves (two rows per rep from `ble_capture.py raw`), and, on a
+  Windows laptop, whether they arrived as separate packet types. What
+  *Connect IQ* hands the app is still Part 7's question.
 
 ---
 
@@ -489,11 +501,11 @@ Freelap chip" stops being true.
 ## Checklist
 
 ```
-Part 1  [ ] chip id, firmware, cone modes noted   [ ] HCI snoop log on   [ ] pytest green
+Part 1  [ ] chip id, firmware, cone modes noted   [ ] notes app + bleak ready  [ ] pytest green
 Part 2  [ ] name in discoverable mode              [ ] lap-mode RAW hex
         [ ] broadcast window timed                 [ ] connect attempt recorded
 Part 3  [ ] expected.json written before the hex  [ ] runs A B C D E G H captured
-        [ ] all.tsv exported and split per run
+        [ ] notes -> ble_capture.py raw -> one TSV per run   [ ] laptop session.tsv
 Part 4  [ ] test_real_captures.py red -> green     [ ] real vectors in Monkey C
 Part 5  [ ] results posted on #4 #5 #6 #9
 Part 6  [ ] fenix7pro tests run                    [ ] sideloaded, launches, settings shown
