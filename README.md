@@ -78,6 +78,7 @@ source/ui/                          activity screen, buttons, save menu
 source-test/                        Monkey C unit tests (see AGENTS.md)
 site/                               the project website (see below)
 tools/decode_capture.py             find timestamp fields in a BLE capture
+tools/ble_capture.py                capture TSV from nRF Connect RAW hex, or live via a laptop (bleak)
 tools/fake_chip.py                  BLE peripheral: one rep, N synthetic reps, or a capture replay
 tools/check_links.py                internal links in the site and the docs
 tools/validate_resources.py         what CI can check without the Garmin SDK
